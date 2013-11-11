@@ -1,3 +1,11 @@
+/*
+* CSci4061 F2013 Assignment 3
+* section: 3
+* date: 11/11/13
+* name: Devon Grandahl, Alex Cook
+* id: 4260296, 4123940 
+*/
+
 #include <stdio.h>
 #include <stdlib.h>
 #include "mm.h"
