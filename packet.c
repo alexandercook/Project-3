@@ -3,10 +3,11 @@
 #include <string.h>
 #include <unistd.h>
 #include <signal.h>
-
+#include <errno.h>
 #include "mm.h"
 
 #define MAX_PACKETS 10
+#define DATA_SIZE 56
 
 typedef char data_t[56];
 
@@ -44,7 +45,7 @@ static packet_t get_packet() {
       strcpy(pkt.data, "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");
       break;
     default:
-      strcpy(pkt.data, "cccccccccccccccccccccccccccccccccccccccccccccccccccccccc\0");
+      strcpy(pkt.data, "cccccccccccccccccccccccccccccccccccccccccccccccccccccccc");
   }
 
   which = (which + 1) % 3;
@@ -52,53 +53,59 @@ static packet_t get_packet() {
   return pkt;
 }
 
-/* TODO - implement */
 static void packet_handler(int sig) {
-  packet_t pkt;
-  fprintf (stderr, "IN PACKET HANDLER, sig=%d\n", sig);  /* TODO - debug only */
-  pkt = get_packet();
-  /* TODO - insert your code here ... stick packet in memory */
+	packet_t pkt;
+	pkt = get_packet();
+	/* stick packet in memory */
     char* pkt_pointer;
     pkt_pointer = mm_get(&mm);
-	*pkt_pointer= "e";
+	memcpy(pkt_pointer, pkt.data, DATA_SIZE); //buffer packet data in an mm pointer
 	pkt_cnt+=1;
-	mm_put(&mm, (void*) pkt_pointer);
+	message.num_packets+=1;
+	message.data[pkt.which]=pkt_pointer;
 }
 
 /*
- * TODO - Create message from packets ... deallocate packets.
+ * Create message from packets, and deallocate packets.
  * Return a pointer to the message on success, or NULL and set errno on
  * failure.
  */
 static char *assemble_message() {
 
-  char * msg;
-	char * memory;
+	char * msg;
 	int i;
-
-  /* TODO - Allocate msg and assemble packets into it */
+    /* Allocate msg and assemble packets into it */
 	msg = (char*) malloc (CHUNK_SIZE * NUM_CHUNKS);
-	for(i=0; i<=pkt_total; i++){
-		*memory = mm_get(&mm);
-		memcpy (msg+(i * CHUNK_SIZE), memory, CHUNK_SIZE);
+
+	for(i=0; i<=pkt_total-1; i++){
+		memcpy (msg+(i*DATA_SIZE), message.data[i], DATA_SIZE);
+		mm_put(&mm, message.data[i]);
 	}
 	
+	message.num_packets=0;
 
-  /* reset these for next message */
-  pkt_total = 1;
-  pkt_cnt = 0;
-  message.num_packets = 0;
+	/* reset these for next message */
+	pkt_total = 3;
+	pkt_cnt = 0;
+	message.num_packets = 0;
 
-  return msg;
+	/* return msg if msg is not empty, otherwise set errno and return NULL */
+	if (msg){
+		return msg;
+	} else {
+		errno=EBADMSG;
+		return NULL;
+	};
+  	
 }
 
 int main(int argc, char **argv) {
-  int i;
-  char *msg;
+	int i;
+	char *msg;
 
-  /* TODO - init memory manager for NUM_CHUNKS chunks of size CHUNK_SIZE each */
+  /* init memory manager for NUM_CHUNKS chunks of size CHUNK_SIZE each */
     mm_init(&mm, NUM_CHUNKS, CHUNK_SIZE);
-  /* TODO - set up alarm handler -- mask all signals within it */
+  /* set up alarm handler -- mask all signals within it */
     struct sigaction act;
 
     act.sa_handler = packet_handler;
@@ -109,39 +116,29 @@ int main(int argc, char **argv) {
         perror("Failed to set SIGALARM handler!\n");
         return -1;
     }
-  /*
-   * TODO - turn on alarm timer ...
-   * use  INTERVAL and INTERVAL_USEC for sec and usec values
-   */
-  message.num_packets = 0;
-    struct timeval time_s, time_e;
+  
+   /* turn on alarm timer */
 
-  fprintf(stderr, "Time taken = %f msec\n",
-          comp_time(time_s, time_e) / 1000.0);
+	ualarm(INTERVAL, INTERVAL_USEC);
 
-	alarm(1);
-	sleep(1);
-	alarm(1);
-	sleep(1);
-	alarm(1);
+	for (i = 1; i <= NUM_MESSAGES; i++) {
+		while (pkt_cnt < pkt_total) {
+		  pause(); /* block until next packet */
+		}
 
-  for (i = 1; i <= NUM_MESSAGES; i++) {
-    while (pkt_cnt < pkt_total) {
-      pause(); /* block until next packet */
-    }
+		msg = assemble_message();
+		if (msg == NULL) {
+		  perror("Failed to assemble message");
+		}
+		else {
+		  fprintf(stderr, "GOT IT: message=%s\n", msg);
+		  free(msg);
+		}
+	}
 
-    msg = assemble_message();
-    if (msg == NULL) {
-      perror("Failed to assemble message");
-    }
-    else {
-      fprintf(stderr, "GOT IT: message=%s\n", msg);
-      free(msg);
-    }
-  }
-
-  /* TODO - Deallocate memory manager */
+  /* Deallocate memory manager */
     mm_release(&mm);
 
   return EXIT_SUCCESS;
 }
+
